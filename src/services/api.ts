@@ -46,7 +46,7 @@ import {
   UserProfile,
   UserRole,
 } from '../types';
-import { getBackendConfig, isSupabaseConfigured, supabase } from './supabaseClient';
+import { getBackendConfig, supabase } from './supabaseClient';
 
 const STORAGE_KEYS = {
   user: 'quickgo_user_v2',
@@ -172,7 +172,7 @@ export const authService = {
 
   async sendPhoneOtp(phone: string): Promise<{ sent: boolean; demoCodeHint?: string }> {
     if (!supabase) throw new Error('Supabase lama habayn. Ku dar VITE_SUPABASE_URL iyo VITE_SUPABASE_ANON_KEY.');
-    const { error } = await supabase.auth.signInWithOtp({ phone: phone.replace(/\s+/g, '') });
+    const { error } = await supabase.auth.signInWithOtp({ phone: phone.replace(/\s+/g, ''), options: { shouldCreateUser: false } });
     if (error) throw error;
     return { sent: true };
   },
