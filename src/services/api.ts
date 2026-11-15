@@ -129,7 +129,7 @@ export const catalogService = {
   },
 };
 
-function mapAuthProfile(authUser: { id: string; email?: string; phone?: string; created_at?: string; user_metadata?: Record<string, unknown> }, row?: Record<string, unknown> | null): UserProfile {
+function mapAuthProfile(authUser: { id: string; email?: string; phone?: string; created_at?: string; user_metadata?: Record<string, unknown>; email_confirmed_at?: string | null }, row?: Record<string, unknown> | null): UserProfile {
   const fullName = String(row?.full_name || authUser.user_metadata?.full_name || 'QuickGo Customer');
   return {
     id: authUser.id,
