@@ -17,22 +17,54 @@ interface AuthedRequest extends Request {
   userId?: string;
 }
 
-// Role-based authorization middleware (uses Supabase JWT when configured, or signed session header in demo mode)
+// Verify the bearer token with Supabase and load the authoritative role from
+// the caller's own RLS-protected profile. Never trust role/user-id request headers.
 function requireRole(...allowedRoles: Role[]) {
-  return (req: AuthedRequest, res: Response, next: NextFunction) => {
-    const roleHeader = (req.headers['x-quickgo-role'] as Role | undefined) || 'customer';
-    const userIdHeader = (req.headers['x-quickgo-user-id'] as string | undefined) || 'guest';
-    req.userRole = roleHeader;
-    req.userId = userIdHeader;
+  return async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+    const authorization = req.headers.authorization;
 
-    if (!allowedRoles.includes(roleHeader)) {
-      return res.status(403).json({
-        error: 'Forbidden: insufficient role permissions',
-        requiredRoles: allowedRoles,
-        currentRole: roleHeader,
-      });
+    if (!supabaseUrl || !anonKey) {
+      return res.status(503).json({ error: 'Authentication is not configured. Protected operations are disabled.' });
     }
-    next();
+    if (!authorization?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'A valid Supabase access token is required.' });
+    }
+
+    try {
+      const authResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+        headers: { apikey: anonKey, Authorization: authorization },
+      });
+      if (!authResponse.ok) {
+        return res.status(401).json({ error: 'Invalid or expired access token.' });
+      }
+
+      const authUser = await authResponse.json() as { id?: string };
+      if (!authUser.id) {
+        return res.status(401).json({ error: 'Authenticated user ID is missing.' });
+      }
+
+      const profileResponse = await fetch(
+        `${supabaseUrl}/rest/v1/profiles?id=eq.${encodeURIComponent(authUser.id)}&select=id,role`,
+        { headers: { apikey: anonKey, Authorization: authorization } },
+      );
+      if (!profileResponse.ok) {
+        return res.status(403).json({ error: 'Unable to verify account permissions.' });
+      }
+
+      const profiles = await profileResponse.json() as Array<{ id: string; role: Role }>;
+      const role = profiles[0]?.role;
+      if (!role || !allowedRoles.includes(role)) {
+        return res.status(403).json({ error: 'Forbidden: insufficient role permissions.' });
+      }
+
+      req.userId = authUser.id;
+      req.userRole = role;
+      return next();
+    } catch {
+      return res.status(503).json({ error: 'Authentication service is temporarily unavailable.' });
+    }
   };
 }
 
