@@ -160,13 +160,7 @@ async function loadSupabaseProfile(authUser: { id: string; email?: string; phone
 
 export const authService = {
   getSession(): { isAuthenticated: boolean; user: UserProfile } {
-    if (isSupabaseConfigured) {
-      return { isAuthenticated: false, user: INITIAL_USER };
-    }
-    return {
-      isAuthenticated: readStorage<boolean>(STORAGE_KEYS.auth, false),
-      user: readStorage<UserProfile>(STORAGE_KEYS.user, INITIAL_USER),
-    };
+    return { isAuthenticated: false, user: INITIAL_USER };
   },
 
   async getAuthenticatedUser(): Promise<UserProfile | null> {
