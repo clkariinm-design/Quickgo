@@ -46,7 +46,7 @@ import {
   UserProfile,
   UserRole,
 } from '../types';
-import { getBackendConfig } from './supabaseClient';
+import { getBackendConfig, isSupabaseConfigured, supabase } from './supabaseClient';
 
 const STORAGE_KEYS = {
   user: 'quickgo_user_v2',
@@ -129,86 +129,131 @@ export const catalogService = {
   },
 };
 
+function mapAuthProfile(authUser: { id: string; email?: string; phone?: string; created_at?: string; user_metadata?: Record<string, unknown> }, row?: Record<string, unknown> | null): UserProfile {
+  const fullName = String(row?.full_name || authUser.user_metadata?.full_name || 'QuickGo Customer');
+  return {
+    id: authUser.id,
+    fullName,
+    email: String(row?.email || authUser.email || ''),
+    phone: String(row?.phone || authUser.phone || authUser.user_metadata?.phone || ''),
+    avatarInitials: getInitials(fullName),
+    joinedAt: String(row?.created_at || authUser.created_at || new Date().toISOString()).slice(0, 10),
+    role: (row?.role as UserRole) || 'customer',
+    phoneVerified: Boolean(row?.phone_verified || authUser.phone),
+    emailVerified: Boolean(row?.email_verified || authUser.email_confirmed_at),
+    twoFactorEnabled: Boolean(row?.two_factor_enabled),
+    walletBalanceUsd: Number(row?.wallet_balance_usd || 0),
+    referralCode: String(row?.referral_code || ''),
+    referralRewardsUsd: 0,
+  };
+}
+
+async function loadSupabaseProfile(authUser: { id: string; email?: string; phone?: string; created_at?: string; user_metadata?: Record<string, unknown>; email_confirmed_at?: string | null }): Promise<UserProfile> {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  const { data, error } = await supabase.from('profiles')
+    .select('id,full_name,email,phone,role,phone_verified,email_verified,two_factor_enabled,wallet_balance_usd,referral_code,created_at')
+    .eq('id', authUser.id)
+    .maybeSingle();
+  if (error) throw error;
+  return mapAuthProfile(authUser, data);
+}
+
 export const authService = {
   getSession(): { isAuthenticated: boolean; user: UserProfile } {
-    const isAuthenticated = readStorage<boolean>(STORAGE_KEYS.auth, true);
-    const user = readStorage<UserProfile>(STORAGE_KEYS.user, INITIAL_USER);
-    return { isAuthenticated, user };
+    if (isSupabaseConfigured) {
+      return { isAuthenticated: false, user: INITIAL_USER };
+    }
+    return {
+      isAuthenticated: readStorage<boolean>(STORAGE_KEYS.auth, false),
+      user: readStorage<UserProfile>(STORAGE_KEYS.user, INITIAL_USER),
+    };
+  },
+
+  async getAuthenticatedUser(): Promise<UserProfile | null> {
+    if (!supabase) return null;
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data.user) return null;
+    return loadSupabaseProfile(data.user);
   },
 
   async sendPhoneOtp(phone: string): Promise<{ sent: boolean; demoCodeHint?: string }> {
-    const remote = await apiPost<{ sent: boolean; demoCodeHint?: string }>('/api/auth/send-otp', { phone });
-    return remote || { sent: true, demoCodeHint: '123456' };
+    if (!supabase) throw new Error('Supabase lama habayn. Ku dar VITE_SUPABASE_URL iyo VITE_SUPABASE_ANON_KEY.');
+    const { error } = await supabase.auth.signInWithOtp({ phone: phone.replace(/\s+/g, '') });
+    if (error) throw error;
+    return { sent: true };
   },
 
   async verifyPhoneOtp(phone: string, otpCode: string): Promise<{ ok: boolean; user?: UserProfile }> {
-    if (otpCode.trim().length !== 6) {
-      return { ok: false };
-    }
-    await apiPost('/api/auth/verify-otp', { phone, code: otpCode });
-    const existing = readStorage<UserProfile>(STORAGE_KEYS.user, INITIAL_USER);
-    const user: UserProfile = {
-      ...existing,
-      phone,
-      phoneVerified: true,
-    };
-    writeStorage(STORAGE_KEYS.user, user);
-    writeStorage(STORAGE_KEYS.auth, true);
-    return { ok: true, user };
+    if (!supabase || !/^\d{6}$/.test(otpCode.trim())) return { ok: false };
+    const { data, error } = await supabase.auth.verifyOtp({
+      phone: phone.replace(/\s+/g, ''),
+      token: otpCode.trim(),
+      type: 'sms',
+    });
+    if (error || !data.user) return { ok: false };
+    return { ok: true, user: await loadSupabaseProfile(data.user) };
   },
 
   async sendEmailVerification(email: string): Promise<{ sent: boolean; demoCodeHint?: string }> {
-    const remote = await apiPost<{ sent: boolean; demoCodeHint?: string }>(
-      '/api/auth/send-email-verification',
-      { email }
-    );
-    return remote || { sent: true, demoCodeHint: '884210' };
+    if (!supabase) throw new Error('Supabase lama habayn. Ku dar VITE_SUPABASE_URL iyo VITE_SUPABASE_ANON_KEY.');
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: { shouldCreateUser: false },
+    });
+    if (error) throw error;
+    return { sent: true };
   },
 
   async verifyEmailCode(email: string, code: string): Promise<boolean> {
-    if (code.trim().length < 4) return false;
-    await apiPost('/api/auth/verify-email', { email, code });
-    return true;
+    if (!supabase || !/^\d{6}$/.test(code.trim())) return false;
+    const { error } = await supabase.auth.verifyOtp({
+      email: email.trim(),
+      token: code.trim(),
+      type: 'email',
+    });
+    return !error;
   },
 
-  async loginWithEmail(email: string, _password: string): Promise<UserProfile> {
-    const existing = readStorage<UserProfile>(STORAGE_KEYS.user, INITIAL_USER);
-    const nameFromEmail = email.split('@')[0]?.replace(/[._-]/g, ' ') || 'QuickGo Customer';
-    const formattedName = existing.email === email ? existing.fullName : capitalizeWords(nameFromEmail);
-    const user: UserProfile = {
-      ...existing,
-      email,
-      fullName: formattedName,
-      avatarInitials: getInitials(formattedName),
-    };
-    writeStorage(STORAGE_KEYS.user, user);
-    writeStorage(STORAGE_KEYS.auth, true);
-    return user;
+  async loginWithEmail(email: string, password: string): Promise<UserProfile> {
+    if (!supabase) throw new Error('Supabase lama habayn. Ku dar VITE_SUPABASE_URL iyo VITE_SUPABASE_ANON_KEY.');
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+    if (error) throw error;
+    if (!data.user) throw new Error('Gelitaanka lama xaqiijin.');
+    return loadSupabaseProfile(data.user);
   },
 
-  async signUp(fullName: string, phone: string, email: string, _password: string): Promise<UserProfile> {
-    const code = `QG-${capitalizeWords(fullName).replace(/\s+/g, '').slice(0, 4).toUpperCase()}-${Math.floor(10 + Math.random() * 89)}`;
-    const user: UserProfile = {
-      id: `usr-${Date.now()}`,
-      fullName: fullName.trim() || 'QuickGo Customer',
+  async signUp(fullName: string, phone: string, email: string, password: string): Promise<UserProfile> {
+    if (!supabase) throw new Error('Supabase lama habayn. Ku dar VITE_SUPABASE_URL iyo VITE_SUPABASE_ANON_KEY.');
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: {
+        data: { full_name: fullName.trim(), phone: phone.trim() },
+      },
+    });
+    if (error) throw error;
+    if (!data.user) throw new Error('Akoonka lama abuuri karin.');
+    if (data.session) return loadSupabaseProfile(data.user);
+    return mapAuthProfile(data.user, {
+      full_name: fullName.trim(),
       email: email.trim(),
       phone: phone.trim(),
-      avatarInitials: getInitials(fullName),
-      joinedAt: new Date().toISOString().slice(0, 10),
       role: 'customer',
-      phoneVerified: false,
-      emailVerified: false,
-      twoFactorEnabled: false,
-      walletBalanceUsd: 5.0,
-      referralCode: code,
-      referralRewardsUsd: 0,
-    };
-    writeStorage(STORAGE_KEYS.user, user);
-    writeStorage(STORAGE_KEYS.auth, true);
-    return user;
+      phone_verified: false,
+      email_verified: false,
+      wallet_balance_usd: 0,
+    });
   },
 
   async logout(): Promise<void> {
+    if (supabase) {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      return;
+    }
     writeStorage(STORAGE_KEYS.auth, false);
   },
 };
