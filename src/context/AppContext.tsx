@@ -247,6 +247,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(session.isAuthenticated);
   const [user, setUser] = useState<UserProfile>(session.user);
 
+  useEffect(() => {
+    let active = true;
+    authService.getAuthenticatedUser().then((currentUser) => {
+      if (!active || !currentUser) return;
+      setUser(currentUser);
+      setIsAuthenticated(true);
+    }).catch(() => {
+      if (active) setIsAuthenticated(false);
+    });
+    return () => { active = false; };
+  }, []);
+
   const [addresses, setAddresses] = useState<Address[]>(() => profileService.getAddresses());
   const [selectedAddressId, setSelectedAddressId] = useState<string>(() => {
     const list = profileService.getAddresses();
@@ -389,18 +401,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const signUp = async (fullName: string, phone: string, email: string, password: string) => {
     const created = await authService.signUp(fullName, phone, email, password);
     setUser(created);
-    setIsAuthenticated(true);
-    setIsAuthOpen(false);
+    const currentUser = await authService.getAuthenticatedUser();
+    if (currentUser) {
+      setUser(currentUser);
+      setIsAuthenticated(true);
+      setIsAuthOpen(false);
+    } else {
+      setIsAuthenticated(false);
+      showToast('Akoonka waa la sameeyay. Fadlan iimaylkaaga ka xaqiiji, dabadeed soo gal.');
+    }
   };
 
   const sendPhoneOtp = async (phone: string) => {
     const res = await authService.sendPhoneOtp(phone);
     pushNotification({
       category: 'otp',
-      title: { en: 'QuickGo OTP Code', so: 'Koodhka Xaqiijinta QuickGo' },
+      title: { en: 'QuickGo OTP Sent', so: 'Koodhka QuickGo Waa La Diray' },
       message: {
-        en: `Your verification code for ${phone} is ${res.demoCodeHint || '123456'}.`,
-        so: `Koodhka xaqiijinta ee ${phone} waa ${res.demoCodeHint || '123456'}.`,
+        en: `A verification code was requested for ${phone}. Check your SMS messages.`,
+        so: `Koodh xaqiijin ayaa loo diray ${phone}. Ka eeg farriimaha SMS-ka.`,
       },
     });
     return res;
@@ -422,10 +441,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const res = await authService.sendEmailVerification(email);
     pushNotification({
       category: 'otp',
-      title: { en: 'Email Verification Code', so: 'Koodhka Xaqiijinta Iimaylka' },
+      title: { en: 'Email Verification Sent', so: 'Xaqiijinta Iimaylka Waa La Diray' },
       message: {
-        en: `Verification code for ${email}: ${res.demoCodeHint || '884210'}`,
-        so: `Koodhka xaqiijinta iimaylka ${email}: ${res.demoCodeHint || '884210'}`,
+        en: `A verification code was requested for ${email}. Check your inbox.`,
+        so: `Koodh xaqiijin ayaa loo diray ${email}. Ka eeg sanduuqa iimaylka.`,
       },
     });
     return res;
@@ -434,12 +453,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const verifyEmailCode = async (email: string, code: string) => {
     const ok = await authService.verifyEmailCode(email, code);
     if (ok) {
-      const updated = profileService.updateUserProfile({
-        ...user,
-        email,
-        emailVerified: true,
-      });
-      setUser(updated);
+      const currentUser = await authService.getAuthenticatedUser();
+      if (currentUser) {
+        setUser(currentUser);
+        setIsAuthenticated(true);
+        setIsAuthOpen(false);
+      } else {
+        const updated = profileService.updateUserProfile({ ...user, email, emailVerified: true });
+        setUser(updated);
+      }
       showToast('Email verified.');
     }
     return ok;

@@ -18,8 +18,8 @@ export const AuthScreen: React.FC = () => {
 
   const [mode, setMode] = useState<AuthMode>('login');
   const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('maxamedmuus61@gmail.com');
-  const [password, setPassword] = useState('••••••••');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [countryCode, setCountryCode] = useState('+252');
   const [phone, setPhone] = useState('63 441 8920');
   const [otp, setOtp] = useState('');
@@ -39,27 +39,39 @@ export const AuthScreen: React.FC = () => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    await loginWithEmail(email, password);
+    try {
+      await loginWithEmail(email, password);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Gelitaanka waa fashilmay.');
+    }
   };
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    await signUp(fullName, `${countryCode} ${phone}`, email, password);
+    try {
+      await signUp(fullName, `${countryCode} ${phone}`, email, password);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Diiwaangelintu waa fashilantay.');
+    }
   };
 
   const handleSendPhoneOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setOtpError('');
     setResendTimer(30);
-    await sendPhoneOtp(`${countryCode} ${phone}`);
-    setMode('otp');
+    try {
+      await sendPhoneOtp(`${countryCode} ${phone}`);
+      setMode('otp');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'OTP lama diri karin.');
+    }
   };
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     const ok = await verifyOtp(`${countryCode} ${phone}`, otp);
     if (!ok) {
-      setOtpError('Enter 6 digits (demo: 123456)');
+      setOtpError('Koodhka aad gelisay sax ma aha. Hubi SMS-ka oo mar kale isku day.');
     }
   };
 
