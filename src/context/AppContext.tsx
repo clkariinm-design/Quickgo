@@ -453,12 +453,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const verifyEmailCode = async (email: string, code: string) => {
     const ok = await authService.verifyEmailCode(email, code);
     if (ok) {
-      const updated = profileService.updateUserProfile({
-        ...user,
-        email,
-        emailVerified: true,
-      });
-      setUser(updated);
+      const currentUser = await authService.getAuthenticatedUser();
+      if (currentUser) {
+        setUser(currentUser);
+        setIsAuthenticated(true);
+        setIsAuthOpen(false);
+      } else {
+        const updated = profileService.updateUserProfile({ ...user, email, emailVerified: true });
+        setUser(updated);
+      }
       showToast('Email verified.');
     }
     return ok;
