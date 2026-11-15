@@ -1,0 +1,6 @@
+{
+  "name": "QuickGo",
+  "description": "Anything You Need, Delivered Fast. Multi-vendor customer delivery app for food, groceries, pharmacy, fashion, electronics, and parcel delivery.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
